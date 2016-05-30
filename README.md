@@ -1,8 +1,8 @@
-# Wikipedia channel for IFTTT
+# Wikipedia channels for IFTTT
 
 An [IFTTT](https://ifttt.com/recipes) channel built for [Wikimedia Tool Labs](http://tools.wmflabs.org/).
 
-It currently supports the following triggers:
+It currently supports the following triggers for Wikipedia:
 
  - Picture of the day
  - Article of the day
@@ -63,11 +63,10 @@ Disconnecting from madhuvishy@ifttt-staging.ifttt.eqiad.wmflabs... done.
 
 * To restart the service: `fab <staging|production> restart_ifttt`
 
-
 # License
 
 Copyright 2015 Ori Livneh <ori@wikimedia.org>,
-               Stephen LaPorte <stephen.laporte@gmail.com>
+               Stephen LaPorte <stephen.laporte@gmail.com>,
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.

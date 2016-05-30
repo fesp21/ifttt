@@ -4,7 +4,8 @@
   ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
   Copyright 2015 Ori Livneh <ori@wikimedia.org>,
-                 Stephen LaPorte <stephen.laporte@gmail.com>
+                 Stephen LaPorte <stephen.laporte@gmail.com>,
+                 Alangi Derick <alangiderick@gmail.com>
 
   Licensed under the Apache License, Version 2.0 (the "License");
   you may not use this file except in compliance with the License.
@@ -21,7 +22,7 @@
 """
 
 import flask
-from flask import request
+from flask import request, render_template, g
 
 from .utils import snake_case
 from .triggers import (ArticleOfTheDay,
@@ -78,6 +79,8 @@ def force_content_type(response):
     """RFC 4627 stipulates that 'application/json' takes no charset parameter,
     but IFTTT expects one anyway. We have to twist Flask's arm to get it to
     break the spec."""
+    if g.get('skip_after_request'):
+        return response
     response.headers['Content-Type'] = 'application/json; charset=utf-8'
     return response
 
@@ -103,7 +106,21 @@ def test_setup():
     return flask.jsonify(data=ret)
 
 
-@app.route('/ifttt/v1/status')
+@app.route('/v1/ifttt-feeds')
+def feeds():
+    """Returns a list of all feeds(triggers) for Wikipedia IFTTT."""
+    feeds = {'samples': {'feeds': {}}}
+    for feed in ALL_TRIGGERS:
+        feed_name = snake_case(feed.__name__)
+        feed_display_name = feed_name.replace("_", " ").capitalize()
+        if feed.default_fields:
+            feeds['samples']['feeds'][feed_display_name] = feed.default_fields
+
+    g.skip_after_request = True
+    return render_template('feeds.html', data=feeds)
+
+
+@app.route('/v1/status')
 def status():
     """Return HTTP 200 and an empty body, as required by the IFTTT spec."""
     return ''

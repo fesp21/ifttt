@@ -5,6 +5,7 @@
 
   Copyright 2015 Ori Livneh <ori@wikimedia.org>
                  Stephen LaPorte <stephen.laporte@gmail.com>
+                 Alangi Derick <alangiderick@gmail.com>
 
   Licensed under the Apache License, Version 2.0 (the "License");
   you may not use this file except in compliance with the License.
@@ -31,6 +32,8 @@ import logging
 import flask
 import flask.views
 
+from flask import g, render_template, make_response, request
+
 import feedparser
 import werkzeug.contrib.cache
 
@@ -47,7 +50,8 @@ from utils import (select,
                     utc_to_epoch,
                     utc_to_iso8601,
                     iso8601_to_epoch,
-                    find_hashtags)
+                    find_hashtags,
+                    snake_case)
 
 LOG_FILE = 'ifttt.log'
 CACHE_EXPIRATION = 5 * 60
@@ -169,9 +173,40 @@ class BaseTriggerView(flask.views.MethodView):
         data = data[:self.limit]
         return flask.jsonify(data=data)
 
+    def get(self):
+        """Handle GET requests."""
+        # build the feed's file name
+        feed_filename = snake_case(self.__class__.__name__)
+
+        self.fields = {}
+        self.params = flask.request.get_json(force=True, silent=True) or {}
+        self.limit = self.params.get('limit', DEFAULT_RESP_LIMIT)
+        trigger_identity = self.params.get('trigger_identity')
+
+        #Gets paramters based on the GET request to return the corresponding RSS
+        params = {"lang": request.args.get('lang'), "user": request.args.get('user'), \
+                    "title": request.args.get('title')}
+        trigger_values = self.params.get("triggerFields", params)
+        for field, default_value in self.default_fields.items():
+            self.fields[field] = trigger_values.get(field)
+            if not self.fields[field] and default_value not in TEST_FIELDS:
+                self.fields[field] = default_value
+            if not self.fields[field]:
+                if field in self.optional_fields and self.fields[field] is not None:
+                    self.fields[field] = ''
+                else:
+                    flask.abort(400)
+        logging.info('%s: %s' % (self.__class__.__name__, trigger_identity))
+        data = self.get_data()
+        data = data[:self.limit]
+        
+        feeds = render_template(feed_filename + '.xml', data=data)
+        response = make_response(feeds)
+        response.headers["Content-Type"] = "application/xml"
+        return response
 
 class BaseFeaturedFeedTriggerView(BaseTriggerView):
-    """Generic view for IFTT Triggers based on FeaturedFeeds."""
+    """Generic view for IFTTT Triggers based on FeaturedFeeds."""
 
     _base_url = 'https://{0.wiki}/w/api.php?action=featuredfeed&feed={0.feed}'
 
@@ -502,7 +537,7 @@ class ArticleRevisions(BaseAPIQueryTriggerView):
                'user': revision['user'],
                'size': revision['size'],
                'comment': revision['comment'],
-               'title': self.params['triggerFields']['title']}
+               'title': self.fields['title']}
         ret.update(super(ArticleRevisions, self).parse_result(ret))
         return ret
 
@@ -586,7 +621,7 @@ class UserRevisions(BaseAPIQueryTriggerView):
         ret = {'date': contrib['timestamp'],
                'url': 'https://%s/w/index.php?diff=%s&oldid=%s' %
                       (self.wiki, contrib['revid'], contrib['parentid']),
-               'user': self.params['triggerFields']['user'],
+               'user': self.fields['user'],
                'size': contrib['size'],
                'comment': contrib['comment'],
                'title': contrib['title']}

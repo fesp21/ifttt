@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+    <channel>
+        <title>Article of the Day feeds</title>
+        <description>List of articles of the day for Wikipedia.</description>
+
+        <language>en-us</language>
+        {% for feeds in data %}
+            <item>
+                <pubDate>{{feeds.created_at}}</pubDate>
+                <guid>{{feeds.entry_id}}</guid>
+                <image>
+                    <url>{{feeds.media_url}}</url>
+                </image>
+                <description>{{feeds.summary}}</description>
+                <title>{{feeds.title}}</title>
+                <link>{{feeds.url}}</link>
+            </item>
+        {% endfor %}
+    </channel>
+</rss>

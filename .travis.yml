@@ -1,0 +1,28 @@
+# Programming language in concern, in this 
+# case python.
+language: python
+
+# Version of python used in the code
+python:
+  - "2.7"
+
+# command to install flask dependencies
+install:
+  - pip install -r requirements.txt
+
+# command to run tests
+script: nosetests -v
+
+# travis notification to irc
+notifications:
+  irc:
+    channels:
+      - "irc.freenode.net#ublab"
+      - "irc.freenode.net#wikidata-feed"
+    on_success: always # [always|never|change] # default: change
+    on_failure: always # [always|never|change] # default: always
+    template:
+      - "%{repository}#%{build_number} (%{branch} - %{commit} : %{author}): %{message}"
+      - "Change view : %{compare_url}"
+      - "Build details : %{build_url}"
+    use_notice: true
