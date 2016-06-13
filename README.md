@@ -2,7 +2,7 @@
 
 An [IFTTT](https://ifttt.com/recipes) channel built for [Wikimedia Tool Labs](http://tools.wmflabs.org/).
 
-It currently supports the following triggers for Wikipedia:
+It currently supports the following triggers:
 
  - Picture of the day
  - Article of the day
@@ -13,6 +13,7 @@ It currently supports the following triggers for Wikipedia:
  - Updates from user
  - Page added to category
  - Page updated in category
+ - Updates to an item
 
 # [WIP] Deploying to Wikimedia Labs
 

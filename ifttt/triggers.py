@@ -57,7 +57,7 @@ LOG_FILE = 'ifttt.log'
 CACHE_EXPIRATION = 5 * 60
 LONG_CACHE_EXPIRATION = 12 * 60 * 60
 DEFAULT_LANG = 'en'
-TEST_FIELDS = ['test', 'Coffee', 'ClueBot', 'All stub articles'] 
+TEST_FIELDS = ['test', 'Coffee', 'ClueBot', 'All stub articles', 'Q12345'] 
 # test properties currently mixed  with trigger default values
 DEFAULT_RESP_LIMIT = 50  # IFTTT spec
 MAXRADIUS = 10000  # Wikipedia's max geosearch radius
@@ -160,7 +160,7 @@ class BaseTriggerView(flask.views.MethodView):
         trigger_values = self.params.get('triggerFields', {})
         for field, default_value in self.default_fields.items():
             self.fields[field] = trigger_values.get(field)
-            if not self.fields[field] and default_value not in TEST_FIELDS:
+            if not self.fields[field] or default_value not in TEST_FIELDS:
                 # TODO: Clean up
                 self.fields[field] = default_value
             if not self.fields[field]:
@@ -175,7 +175,7 @@ class BaseTriggerView(flask.views.MethodView):
 
     def get(self):
         """Handle GET requests."""
-        # build the feed's file name
+        # build the feed's file name dynamically
         feed_filename = snake_case(self.__class__.__name__)
 
         self.fields = {}
@@ -183,13 +183,13 @@ class BaseTriggerView(flask.views.MethodView):
         self.limit = self.params.get('limit', DEFAULT_RESP_LIMIT)
         trigger_identity = self.params.get('trigger_identity')
 
-        #Gets paramters based on the GET request to return the corresponding RSS
+        # Gets paramters based on the GET request to return the corresponding RSS
         params = {"lang": request.args.get('lang'), "user": request.args.get('user'), \
-                    "title": request.args.get('title')}
+                    "title": request.args.get('title'), "itemid": request.args.get('itemid')}
         trigger_values = self.params.get("triggerFields", params)
         for field, default_value in self.default_fields.items():
             self.fields[field] = trigger_values.get(field)
-            if not self.fields[field] and default_value not in TEST_FIELDS:
+            if not self.fields[field] or default_value not in TEST_FIELDS:
                 self.fields[field] = default_value
             if not self.fields[field]:
                 if field in self.optional_fields and self.fields[field] is not None:
@@ -245,6 +245,33 @@ class BaseAPIQueryTriggerView(BaseTriggerView):
     """Generic view for IFTT Triggers based on API MediaWiki Queries."""
 
     _base_url = 'http://{0.wiki}/w/api.php'
+
+    def get_query(self):
+        formatted_url = self._base_url.format(self)
+        params = urlencode(self.query_params)
+        url = '%s?%s' % (formatted_url, params)
+        resp = cache.get(url)
+        if not resp:
+            resp = json.load(urllib2.urlopen(url))
+            cache.set(url, resp, timeout=CACHE_EXPIRATION)
+        return resp
+
+    def parse_result(self, result):
+        meta_id = url_to_uuid5(result['url'])
+        created_at = result['date']
+        ts = iso8601_to_epoch(result['date'])
+        return {'created_at': created_at,
+                'meta': {'id': meta_id, 'timestamp': ts}}
+
+    def get_data(self):
+        resp = self.get_query()
+        return map(self.parse_result, resp)
+
+
+class BaseWikidataAPIQueryTriggerView(BaseTriggerView):
+    """Generic view for IFTTT Triggers based on API Wikidata Queries."""
+
+    _base_url = 'https://www.wikidata.org/w/api.php'
 
     def get_query(self):
         formatted_url = self._base_url.format(self)
@@ -626,4 +653,40 @@ class UserRevisions(BaseAPIQueryTriggerView):
                'comment': contrib['comment'],
                'title': contrib['title']}
         ret.update(super(UserRevisions, self).parse_result(ret))
+        return ret
+
+class ItemRevisions(BaseWikidataAPIQueryTriggerView):
+    """Trigger for revisions to a specified Wikidata item."""
+
+    default_fields = {'itemid': 'Q12345'}
+    query_params = {'action': 'query',
+                    'prop': 'revisions',
+                    'titles': None,
+                    'rvlimit': 50,
+                    'rvprop': 'ids|timestamp|user|size|comment',
+                    'format': 'json'}
+
+    def get_query(self):
+        self.wiki = 'www.wikidata.org'
+        self.query_params['titles'] = self.fields['itemid']
+        return super(ItemRevisions, self).get_query()
+
+    def get_data(self):
+        api_resp = self.get_query()
+        try:
+            page_id = api_resp['query']['pages'].keys()[0]
+            revisions = api_resp['query']['pages'][page_id]['revisions']
+        except KeyError:
+            return []
+        return map(self.parse_result, revisions)
+
+    def parse_result(self, revision):
+        ret = {'date': revision['timestamp'],
+               'url': 'https://%s/w/index.php?diff=%s&oldid=%s' %
+                      (self.wiki, revision['revid'], revision['parentid']),
+               'user': revision['user'],
+               'size': revision['size'],
+               'comment': revision['comment'],
+               'item': self.fields['itemid']}
+        ret.update(super(ItemRevisions, self).parse_result(ret))
         return ret
