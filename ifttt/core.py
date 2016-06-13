@@ -33,7 +33,8 @@ from .triggers import (ArticleOfTheDay,
                        NewArticle,
                        NewHashtag,
                        NewCategoryMember,
-                       CategoryMemberRevisions)
+                       CategoryMemberRevisions,
+                       ItemRevisions)
 
 import logging
 LOG_FILE = 'ifttt.log'
@@ -51,11 +52,12 @@ ALL_TRIGGERS = [ArticleOfTheDay,
                 NewArticle,
                 NewHashtag,
                 NewCategoryMember,
-                CategoryMemberRevisions]
+                CategoryMemberRevisions,
+                ItemRevisions]
 
 app = flask.Flask(__name__)
 # Load default config first
-app.config.from_pyfile('../default.cfg', silent=True)
+# app.config.from_pyfile('../default.cfg', silent=True)
 # Override defaults if ifttt.cfg is present
 app.config.from_pyfile('../ifttt.cfg', silent=True)
 
@@ -106,7 +108,7 @@ def test_setup():
     return flask.jsonify(data=ret)
 
 
-@app.route('/v1/ifttt-feeds')
+@app.route('/ifttt/v1/ifttt-feeds')
 def feeds():
     """Returns a list of all feeds(triggers) for Wikipedia IFTTT."""
     feeds = {'samples': {'feeds': {}}}
@@ -120,7 +122,7 @@ def feeds():
     return render_template('feeds.html', data=feeds)
 
 
-@app.route('/v1/status')
+@app.route('/ifttt/v1/status')
 def status():
     """Return HTTP 200 and an empty body, as required by the IFTTT spec."""
     return ''
