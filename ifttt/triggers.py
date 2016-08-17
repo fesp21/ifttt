@@ -5,7 +5,8 @@
 
   Copyright 2015 Ori Livneh <ori@wikimedia.org>
                  Stephen LaPorte <stephen.laporte@gmail.com>
-                 Alangi Derick <alangiderick@gmail.com>
+
+            2016 Alangi Derick <alangiderick@gmail.com>
 
   Licensed under the Apache License, Version 2.0 (the "License");
   you may not use this file except in compliance with the License.
@@ -26,6 +27,7 @@ import datetime
 import operator
 import urllib2
 import json
+import time
 import lxml.html
 import logging
 
@@ -57,7 +59,7 @@ LOG_FILE = 'ifttt.log'
 CACHE_EXPIRATION = 5 * 60
 LONG_CACHE_EXPIRATION = 12 * 60 * 60
 DEFAULT_LANG = 'en'
-TEST_FIELDS = ['test', 'Coffee', 'ClueBot', 'All stub articles', 'Q12345'] 
+TEST_FIELDS = ['test', 'Coffee', 'ClueBot', 'All articles lacking sources', 'Q12345', 'Q82594', 'P106'] 
 # test properties currently mixed  with trigger default values
 DEFAULT_RESP_LIMIT = 50  # IFTTT spec
 MAXRADIUS = 10000  # Wikipedia's max geosearch radius
@@ -117,8 +119,7 @@ def add_images(get_data):
             if not data[i]['media_url']:
                 data[i]['media_url'] = 'https://upload.wikimedia.org/wikipedia/commons/thumb/5/5a/Wikipedia%27s_W.svg/500px-Wikipedia%27s_W.svg.png'
         return data
-    return with_images
-        
+    return with_images        
 
 def get_page_image(page_titles, lang=DEFAULT_LANG, timeout=LONG_CACHE_EXPIRATION):
     page_images = {}
@@ -160,7 +161,7 @@ class BaseTriggerView(flask.views.MethodView):
         trigger_values = self.params.get('triggerFields', {})
         for field, default_value in self.default_fields.items():
             self.fields[field] = trigger_values.get(field)
-            if not self.fields[field] or default_value not in TEST_FIELDS:
+            if self.fields[field] == '' and default_value not in TEST_FIELDS:
                 # TODO: Clean up
                 self.fields[field] = default_value
             if not self.fields[field]:
@@ -179,17 +180,19 @@ class BaseTriggerView(flask.views.MethodView):
         feed_filename = snake_case(self.__class__.__name__)
 
         self.fields = {}
-        self.params = flask.request.get_json(force=True, silent=True) or {}
+        self.params = dict((key, request.args.getlist(key) 
+            if len(request.args.getlist(key)) > 1 
+            else request.args.getlist(key)[0]) 
+        for key in request.args.keys())
+        self.params = dict(triggerFields=dict(self.params))
+
         self.limit = self.params.get('limit', DEFAULT_RESP_LIMIT)
         trigger_identity = self.params.get('trigger_identity')
 
-        # Gets paramters based on the GET request to return the corresponding RSS
-        params = {"lang": request.args.get('lang'), "user": request.args.get('user'), \
-                    "title": request.args.get('title'), "itemid": request.args.get('itemid')}
-        trigger_values = self.params.get("triggerFields", params)
+        trigger_values = self.params.get("triggerFields", {})
         for field, default_value in self.default_fields.items():
             self.fields[field] = trigger_values.get(field)
-            if not self.fields[field] or default_value not in TEST_FIELDS:
+            if self.fields[field] == '' and default_value not in TEST_FIELDS:
                 self.fields[field] = default_value
             if not self.fields[field]:
                 if field in self.optional_fields and self.fields[field] is not None:
@@ -204,6 +207,7 @@ class BaseTriggerView(flask.views.MethodView):
         response = make_response(feeds)
         response.headers["Content-Type"] = "application/xml"
         return response
+
 
 class BaseFeaturedFeedTriggerView(BaseTriggerView):
     """Generic view for IFTTT Triggers based on FeaturedFeeds."""
@@ -269,7 +273,7 @@ class BaseAPIQueryTriggerView(BaseTriggerView):
 
 
 class BaseWikidataAPIQueryTriggerView(BaseTriggerView):
-    """Generic view for IFTTT Triggers based on API Wikidata Queries."""
+    """Generic view for IFTTT Triggers based on Wikidata API calls."""
 
     _base_url = 'https://www.wikidata.org/w/api.php'
 
@@ -287,6 +291,37 @@ class BaseWikidataAPIQueryTriggerView(BaseTriggerView):
         meta_id = url_to_uuid5(result['url'])
         created_at = result['date']
         ts = iso8601_to_epoch(result['date'])
+        return {'created_at': created_at,
+                'meta': {'id': meta_id, 'timestamp': ts}}
+
+    def get_data(self):
+        resp = self.get_query()
+        return map(self.parse_result, resp)
+
+
+class BaseWikidataSparqlQueryTriggerView(BaseTriggerView):
+    """Generic view for IFTTT Triggers based on Wikidata SPARQL Queries. 
+    These queries are executed on the WDQS SPARQL Endpoint through a GET 
+    request and results are returned in a format specified (JSON)"""
+
+    _base_url = 'https://query.wikidata.org/sparql'
+
+    def get_query(self):
+        formatted_url = self._base_url.format(self)
+        params = urlencode(self.query_params)
+        url = '%s?%s' % (formatted_url, params)
+        resp = cache.get(url)
+        if not resp:
+            resp = json.load(urllib2.urlopen(url))
+            cache.set(url, resp, timeout=CACHE_EXPIRATION)
+        return resp
+
+    def parse_result(self, result):
+        # Get the timestamp of when the query is runned in the specified format
+        timestamp = "{:%Y-%m-%dT%H:%M:%SZ}".format(datetime.datetime.now())
+        meta_id = url_to_uuid5(result['user'])
+        created_at = result['date']
+        ts = iso8601_to_epoch(timestamp)
         return {'created_at': created_at,
                 'meta': {'id': meta_id, 'timestamp': ts}}
 
@@ -449,7 +484,7 @@ class NewHashtag(BaseTriggerView):
 
 class NewCategoryMember(BaseTriggerView):
     """Trigger each time a new article appears in a category"""
-    default_fields = {'lang': DEFAULT_LANG, 'category': 'All stub articles'}
+    default_fields = {'lang': DEFAULT_LANG, 'category': 'All articles lacking sources'}
     
     @add_images
     def get_data(self):
@@ -492,7 +527,7 @@ class NewCategoryMember(BaseTriggerView):
 class CategoryMemberRevisions(BaseTriggerView):
     """Trigger for revisions to articles within a specified category."""
 
-    default_fields = {'lang': DEFAULT_LANG, 'category': 'All stub articles'}
+    default_fields = {'lang': DEFAULT_LANG, 'category': 'All articles lacking sources'}
     
     @add_images
     def get_data(self):
@@ -564,7 +599,7 @@ class ArticleRevisions(BaseAPIQueryTriggerView):
                'user': revision['user'],
                'size': revision['size'],
                'comment': revision['comment'],
-               'title': self.fields['title']}
+               'title': self.params['triggerFields']['title']}
         ret.update(super(ArticleRevisions, self).parse_result(ret))
         return ret
 
@@ -648,12 +683,13 @@ class UserRevisions(BaseAPIQueryTriggerView):
         ret = {'date': contrib['timestamp'],
                'url': 'https://%s/w/index.php?diff=%s&oldid=%s' %
                       (self.wiki, contrib['revid'], contrib['parentid']),
-               'user': self.fields['user'],
+               'user': self.params['triggerFields']['user'],
                'size': contrib['size'],
                'comment': contrib['comment'],
                'title': contrib['title']}
         ret.update(super(UserRevisions, self).parse_result(ret))
         return ret
+
 
 class ItemRevisions(BaseWikidataAPIQueryTriggerView):
     """Trigger for revisions to a specified Wikidata item."""
@@ -687,6 +723,65 @@ class ItemRevisions(BaseWikidataAPIQueryTriggerView):
                'user': revision['user'],
                'size': revision['size'],
                'comment': revision['comment'],
-               'item': self.fields['itemid']}
+               'item': self.params['triggerFields']['itemid']}
         ret.update(super(ItemRevisions, self).parse_result(ret))
+        return ret
+
+
+class PopularPersonsBirthday(BaseWikidataSparqlQueryTriggerView):
+    """Trigger for popular persons birthday on Wikidata"""
+
+    default_fields = {'lang': DEFAULT_LANG, 'property': 'P106', 'item': 'Q82594'}
+    query_params = {'query': '', 'format': 'json'}
+
+    def get_query(self):
+        self.wiki = 'query.wikidata.org'
+        self.default_fields['lang'] = self.fields['lang']
+        self.default_fields['property'] = self.fields['property']
+        self.default_fields['item'] = self.fields['item']
+
+        # SPARQL query to get birthdays of people from Wikidata based on trigger fields.
+        query = """SELECT ?entity ?itemLabel ?propertyLabel ?date (year(?date) as ?year)
+                    WHERE 
+                    { 
+                        ?entityS wdt:P569 ?date . 
+                        ?entityS wdt:%s wd:%s .
+                        VALUES ?property { wd:%s } .
+                        VALUES ?item { wd:%s } . 
+                        SERVICE wikibase:label 
+                        { 
+                            bd:serviceParam wikibase:language "%s" . 
+                            ?entityS rdfs:label ?entity . 
+                            ?item rdfs:label ?itemLabel . 
+                            ?property rdfs:label ?propertyLabel 
+                        } FILTER (datatype(?date) = xsd:dateTime && month(?date) 
+                            = month(now()) && day(?date) <= day(now())) }
+                    ORDER BY DESC(day(?date)) DESC(?year)""" % (self.default_fields['property'], 
+                        self.default_fields['item'], self.default_fields['property'], 
+                        self.default_fields['item'], self.default_fields['lang'])
+
+        self.query_params = {'query': query, 'format': 'json'}
+        return super(PopularPersonsBirthday, self).get_query()
+
+    def get_data(self):
+        api_resp = self.get_query()
+        try:
+            subject = api_resp['results']['bindings']
+        except KeyError:
+            return []
+        return map(self.parse_result, subject)
+
+    def parse_result(self, subject):
+        # Get the datetime of today and extract the year to compute
+        # the age of the person with birthday.
+        date = datetime.datetime.now()
+        age = int(date.year) - int(subject['year']['value'])
+
+        ret = {'date': subject['date']['value'],
+               'user': subject['entity']['value'],
+               'year': subject['year']['value'],
+               'age': age,
+               'item': subject['itemLabel']['value'],
+               'property': subject['propertyLabel']['value']}
+        ret.update(super(PopularPersonsBirthday, self).parse_result(ret))
         return ret

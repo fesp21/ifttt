@@ -1,19 +1,20 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <rss version="2.0">
     <channel>
-        <title>Wikidata Item revisions feed</title>
-        <description>List of a Wikidata item revisions.</description>
+        <title>New Category Member feeds</title>
+        <description>List New Category member for Wikipedia.</description>
 
         <language>en-us</language>
         {% for feeds in data %}
             <item>
-                <comment>{{feeds.comment}}</comment>
+                <comment>{{feeds.category}}</comment>
                 <pubDate>{{feeds.created_at}}</pubDate>
                 <date>{{feeds.date}}</date>
-                <description>Size: {{feeds.size}}</description>
+                <image>
+                    <url>{{feeds.media_url}}</url>
+                </image>
+                <title>{{feeds.title}}</title>
                 <url>{{feeds.url}}</url>
-                <title>{{feeds.item}}</title>
-                <guid>{{feeds.user}}</guid>
             </item>
         {% endfor %}
     </channel>

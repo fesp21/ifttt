@@ -5,7 +5,8 @@
 
   Copyright 2015 Ori Livneh <ori@wikimedia.org>,
                  Stephen LaPorte <stephen.laporte@gmail.com>,
-                 Alangi Derick <alangiderick@gmail.com>
+            
+            2016 Alangi Derick <alangiderick@gmail.com>
 
   Licensed under the Apache License, Version 2.0 (the "License");
   you may not use this file except in compliance with the License.
@@ -23,6 +24,8 @@
 
 import flask
 from flask import request, render_template, g
+from flask import redirect, url_for
+from flask_bootstrap import Bootstrap
 
 from .utils import snake_case
 from .triggers import (ArticleOfTheDay,
@@ -34,7 +37,8 @@ from .triggers import (ArticleOfTheDay,
                        NewHashtag,
                        NewCategoryMember,
                        CategoryMemberRevisions,
-                       ItemRevisions)
+                       ItemRevisions,
+                       PopularPersonsBirthday)
 
 import logging
 LOG_FILE = 'ifttt.log'
@@ -53,11 +57,13 @@ ALL_TRIGGERS = [ArticleOfTheDay,
                 NewHashtag,
                 NewCategoryMember,
                 CategoryMemberRevisions,
-                ItemRevisions]
+                ItemRevisions,
+                PopularPersonsBirthday]
 
 app = flask.Flask(__name__)
+bootstrap = Bootstrap(app)
 # Load default config first
-# app.config.from_pyfile('../default.cfg', silent=True)
+app.config.from_pyfile('../default.cfg', silent=True)
 # Override defaults if ifttt.cfg is present
 app.config.from_pyfile('../ifttt.cfg', silent=True)
 
@@ -75,6 +81,18 @@ def unauthorized(e):
     error = {'message': 'Unauthorized'}
     return flask.jsonify(errors=[error]), 401
 
+@app.errorhandler(404)
+def page_not_found(e):
+    """The page you are looking for is not found on the server"""
+    g.skip_after_request = True
+    return render_template('error_pages/404.html'), 404
+
+@app.errorhandler(500)
+def internal_server_error(e):
+    """There was an internal server error"""
+    g.skip_after_request = True
+    return render_template('error_pages/500.html'), 500
+
 
 @app.after_request
 def force_content_type(response):
@@ -82,6 +100,7 @@ def force_content_type(response):
     but IFTTT expects one anyway. We have to twist Flask's arm to get it to
     break the spec."""
     if g.get('skip_after_request'):
+        response.headers['Content-Type'] = 'text/html; charset=utf-8'
         return response
     response.headers['Content-Type'] = 'application/json; charset=utf-8'
     return response
@@ -92,6 +111,8 @@ def validate_channel_key():
     """Verify that the 'IFTTT-Channel-Key' header is present on each request
     and that its value matches the channel key we got from IFTTT. If a request
     fails this check, we reject it with HTTP 401."""
+    if flask.request.method == 'GET' and flask.request.endpoint != 'status':
+        return
     channel_key = flask.request.headers.get('IFTTT-Channel-Key')
     if not app.debug and channel_key != app.config.get('CHANNEL_KEY'):
         flask.abort(401)
@@ -110,7 +131,7 @@ def test_setup():
 
 @app.route('/ifttt/v1/ifttt-feeds')
 def feeds():
-    """Returns a list of all feeds(triggers) for Wikipedia IFTTT."""
+    """Returns a list of all feeds (triggers) for in the app."""
     feeds = {'samples': {'feeds': {}}}
     for feed in ALL_TRIGGERS:
         feed_name = snake_case(feed.__name__)
@@ -118,6 +139,10 @@ def feeds():
         if feed.default_fields:
             feeds['samples']['feeds'][feed_display_name] = feed.default_fields
 
+    # Set skip_after_request through the g object to True 
+    # so that the Content-Type returned will be plain text 
+    # for the HTML in feeds.html to render correctly and not 
+    # in JSON format as the flask default Content-Type.
     g.skip_after_request = True
     return render_template('feeds.html', data=feeds)
 
